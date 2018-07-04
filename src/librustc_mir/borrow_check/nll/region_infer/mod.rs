@@ -9,8 +9,9 @@
 // except according to those terms.
 
 use super::universal_regions::UniversalRegions;
-use borrow_check::nll::constraints::{ConstraintIndex, ConstraintSccIndex, ConstraintSet,
-                                     OutlivesConstraint};
+use borrow_check::nll::constraints::{
+    ConstraintIndex, ConstraintSccIndex, ConstraintSet, OutlivesConstraint,
+};
 use borrow_check::nll::region_infer::values::ToElementIndex;
 use borrow_check::nll::type_check::Locations;
 use rustc::hir::def_id::DefId;
@@ -26,7 +27,8 @@ use rustc::mir::{
 use rustc::ty::{self, RegionVid, Ty, TyCtxt, TypeFoldable};
 use rustc::util::common;
 use rustc_data_structures::graph::scc::Sccs;
-use rustc_data_structures::indexed_vec::{Idx, IndexVec};
+use rustc_data_structures::indexed_set::{IdxSet, IdxSetBuf};
+use rustc_data_structures::indexed_vec::IndexVec;
 
 use std::rc::Rc;
 
@@ -402,14 +404,28 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // SCC. For each SCC, we visit its successors and compute
         // their values, then we union all those values to get our
         // own.
-        for scc_index in (0..self.constraints_scc.num_sccs()).map(ConstraintSccIndex::new) {
-            self.propagate_constraints_scc(scc_index);
+        let visited = &mut IdxSetBuf::new_empty(self.constraints_scc.num_sccs());
+        for scc_index in self.constraints_scc.all_sccs() {
+            self.propagate_constraints_scc_if_new(scc_index, visited);
         }
     }
 
-    fn propagate_constraints_scc(&mut self, scc_a: ConstraintSccIndex) {
-        debug!("propagate_constraints_scc(scc_a = {:?})", scc_a);
+    #[inline]
+    fn propagate_constraints_scc_if_new(
+        &mut self,
+        scc_a: ConstraintSccIndex,
+        visited: &mut IdxSet<ConstraintSccIndex>,
+    ) {
+        if visited.add(&scc_a) {
+            self.propagate_constraints_scc_new(scc_a, visited);
+        }
+    }
 
+    fn propagate_constraints_scc_new(
+        &mut self,
+        scc_a: ConstraintSccIndex,
+        visited: &mut IdxSet<ConstraintSccIndex>,
+    ) {
         let constraints_scc = self.constraints_scc.clone();
 
         // Walk each SCC `B` such that `A: B`...
@@ -420,7 +436,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             );
 
             // ...compute the value of `B`...
-            self.propagate_constraints_scc(scc_b);
+            self.propagate_constraints_scc_if_new(scc_b, visited);
 
             // ...and add elements from `B` into `A`.
             self.scc_values.add_region(scc_a, scc_b);
