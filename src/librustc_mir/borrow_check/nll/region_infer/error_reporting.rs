@@ -318,7 +318,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
         while changed {
             changed = false;
-            for constraint in &*self.constraints {
+            for constraint in self.constraints.iter() {
                 if let Some(n) = result_set[constraint.sup] {
                     let m = n + 1;
                     if result_set[constraint.sub]
