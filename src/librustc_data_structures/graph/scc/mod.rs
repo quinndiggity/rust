@@ -13,6 +13,7 @@
 //! node in the graph. This uses Tarjan's algorithm that completes in
 //! O(n) time.
 
+use fx::FxHashSet;
 use graph::{DirectedGraph, WithNumNodes, WithSuccessors};
 use indexed_vec::{Idx, IndexVec};
 use std::ops::Range;
@@ -113,6 +114,13 @@ struct SccsConstruction<'c, G: DirectedGraph + WithNumNodes + WithSuccessors + '
     /// we push it on the stack. When we complete an SCC, we can pop
     /// everything off the stack that was found along the way.
     successors_stack: Vec<S>,
+
+    /// A set used to strip duplicates. As we accumulate successors
+    /// into the successors_stack, we sometimes get duplicate entries.
+    /// We use this set to remove those -- we keep it around between
+    /// successors to amortize memory allocation costs.
+    duplicate_set: FxHashSet<S>,
+
     scc_data: SccData<S>,
 }
 
@@ -180,6 +188,7 @@ where
                 ranges: IndexVec::new(),
                 all_successors: Vec::new(),
             },
+            duplicate_set: FxHashSet::default(),
         };
 
         let scc_indices = (0..num_nodes)
@@ -307,8 +316,16 @@ where
         debug_assert_eq!(r, Some(node));
 
         if min_depth == depth {
-            let scc_index = self.scc_data
-                .create_scc(self.successors_stack.drain(successors_len..));
+            // Note that successor stack may have duplicates, so we
+            // want to remove those:
+            let deduplicated_successors = {
+                let duplicate_set = &mut self.duplicate_set;
+                duplicate_set.clear();
+                self.successors_stack
+                    .drain(successors_len..)
+                    .filter(move |&i| duplicate_set.insert(i))
+            };
+            let scc_index = self.scc_data.create_scc(deduplicated_successors);
             self.node_states[node] = NodeState::InCycle { scc_index };
             WalkReturn::Complete { scc_index }
         } else {
